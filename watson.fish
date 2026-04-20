@@ -55,6 +55,24 @@ function __fish_watson_get_frames -d "return a list of frames" #TODO, use watson
   command watson frames
 end
 
+function __fish_watson_needs_clickup_sub -d "true when the user is picking a 'watson clickup <sub>'"
+  set cmd (commandline -opc)
+  if [ (count $cmd) -eq 2 -a $cmd[1] = 'watson' -a $cmd[2] = 'clickup' ]
+    return 0
+  end
+  return 1
+end
+
+function __fish_watson_using_clickup_sub -d "true when watson is using 'clickup <argv[1]>'"
+  set cmd (commandline -opc)
+  if [ (count $cmd) -ge 3 -a $cmd[1] = 'watson' -a $cmd[2] = 'clickup' ]
+    if [ $argv[1] = $cmd[3] ]
+      return 0
+    end
+  end
+  return 1
+end
+
 function __fish_watson_needs_project -d "check if we need a project"
   set cmd (commandline -opc)
   if [ (count $cmd) -ge 2 -a $cmd[1] = 'watson' ]
@@ -94,6 +112,7 @@ complete -f -c watson -n '__fish_watson_using_command add' -s f -l from -d "Star
 complete -f -c watson -n '__fish_watson_has_from add' -s t -l to -d "end date for add"
 complete -f -c watson -n '__fish_watson_using_command add' -s c -l confirm-new-project -d "Confirm addition of new project"
 complete -f -c watson -n '__fish_watson_using_command add' -s b -l confirm-new-tag -d "Confirm addition of new tag"
+complete -f -c watson -n '__fish_watson_using_command add' -l cu -d "ClickUp task id (stored as cu:<id> tag)"
 
 # aggregate
 complete -f -c watson -n '__fish_watson_needs_sub' -a aggregate -d "Display a report of the time spent on each project aggregated by day"
@@ -107,6 +126,25 @@ complete -f -c watson -n '__fish_watson_using_command aggregate' -s j -l json -d
 complete -f -c watson -n '__fish_watson_using_command aggregate' -s s -l csv -d "output csv"
 complete -f -c watson -n '__fish_watson_using_command aggregate' -s g -l pager -d "view through pager"
 complete -f -c watson -n '__fish_watson_using_command aggregate' -s G -l no-pager -d "don't vew through pager"
+
+# clickup
+complete -f -c watson -n '__fish_watson_needs_sub' -a clickup -d "Push Watson frames to ClickUp as time entries"
+complete -f -c watson -n '__fish_watson_needs_clickup_sub' -a push -d "Push frames for a given day to ClickUp"
+complete -f -c watson -n '__fish_watson_needs_clickup_sub' -a tag -d "Attach a ClickUp task id to an existing frame"
+complete -f -c watson -n '__fish_watson_needs_clickup_sub' -a find -d "Search ClickUp tasks by substring"
+
+# clickup push
+complete -f -c watson -n '__fish_watson_using_clickup_sub push' -l day -d "today, yesterday, -Nd, or YYYY-MM-DD"
+complete -f -c watson -n '__fish_watson_using_clickup_sub push' -l dry-run -d "Report without calling the API"
+complete -f -c watson -n '__fish_watson_using_clickup_sub push' -l force -d "Re-push synced frames; skip frames without a ClickUp id"
+
+# clickup tag
+complete -f -c watson -n '__fish_watson_using_clickup_sub tag' -a "(__fish_watson_get_frames)"
+
+# clickup find
+complete -f -c watson -n '__fish_watson_using_clickup_sub find' -l list-id -d "Limit search to this ClickUp list id"
+complete -f -c watson -n '__fish_watson_using_clickup_sub find' -l include-closed -d "Include closed tasks"
+complete -f -c watson -n '__fish_watson_using_clickup_sub find' -l limit -d "Print at most N matches (default 50)"
 
 # config
 complete -f -c watson -n '__fish_watson_needs_sub' -a config -d "Get and set configuration options"
@@ -177,6 +215,7 @@ complete -f -c watson -n '__fish_watson_using_command restart' -a "(__fish_watso
 complete -f -c watson -n '__fish_watson_needs_sub' -a start -d "Start monitoring time for a project"
 complete -f -c watson -n '__fish_watson_needs_project start' -a "(__fish_watson_get_projects)"
 complete -f -c watson -n '__fish_watson_has_project start' -a "+(__fish_watson_get_tags)"
+complete -f -c watson -n '__fish_watson_using_command start' -l cu -d "ClickUp task id (stored as cu:<id> tag)"
 
 # status
 complete -f -c watson -n '__fish_watson_needs_sub' -a status -d "Display when the current project was started and time spent"

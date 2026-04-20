@@ -29,11 +29,14 @@ case $1 in
     exit 0
     ;;
   bash)
-    src_command="source"
+    # Click 8 renamed the completion env-var values: bash is now
+    # `bash_source`, zsh is `zsh_source`. The pre-8 values (`source`,
+    # `source_zsh`) produce empty output on current click.
+    src_command="bash_source"
     target_file="watson.completion"
     ;;
   zsh)
-    src_command="source_zsh"
+    src_command="zsh_source"
     target_file="watson.zsh-completion"
     ;;
   *)
@@ -41,4 +44,4 @@ case $1 in
     exit 1
 esac
 
-_WATSON_COMPLETE=$src_command watson > "$target_file" || true
+_WATSON_COMPLETE=$src_command watson > "$target_file"
