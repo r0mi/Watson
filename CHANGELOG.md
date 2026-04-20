@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-04-20
+
+### Added
+
+- New `watson clickup` command group for syncing Watson frames to ClickUp
+  (app.clickup.com):
+  - `watson clickup push --day <today|yesterday|-Nd|YYYY-MM-DD>
+    [--dry-run] [--force]` posts frames for the selected day to ClickUp
+    as time entries. `--dry-run` reports which frames would be pushed and
+    which are missing a ClickUp id without calling the API. `--force`
+    re-pushes frames already in the local sync map and skips (instead of
+    aborting on) frames without a ClickUp id.
+  - `watson clickup tag <frame_id> <cu_id>` attaches a ClickUp task id to
+    an existing frame, replacing any existing `cu:*` tag.
+  - `watson clickup find <substring>` searches ClickUp tasks by name
+    (case-insensitive); output includes the ClickUp list id so it can be
+    pasted into `clickup.list_id` config. Use `--list-id` or the
+    `clickup.list_id` config to scope the search to a single list for
+    speed.
+- `--cu <task_id>` flag on `start` and `add`, plus the `+cu:<task_id>`
+  tag convention. Either attaches a ClickUp id to the frame.
+- `watson log` appends a `✓ cu` marker to frames that have been pushed
+  to ClickUp.
+- Flexible datetime shorthand accepted by every `--at` / `--from` / `--to`
+  option: `now`; past offsets `-5m`, `-1h30m`, `-90s`;
+  `yesterday HH:MM[:SS]` and `today HH:MM[:SS]`; `MM-DD HH:MM[:SS]` and
+  `DD.MM HH:MM[:SS]` (this year). Existing absolute formats still work.
+- New local state file `clickup_sync` in the Watson data directory,
+  mapping frame ids to ClickUp time-entry ids.
+- Two new config keys: `clickup.token`, `clickup.team_id` (required for
+  ClickUp sync), and optional `clickup.list_id` for scoped searches.
+
+### Changed
+
+- `Makefile` uses `python -m venv` (stdlib) instead of the separate
+  `virtualenv` binary. Override the interpreter with
+  `make env PYTHON=python3.11`.
+
 ## [2.1.0] - 2022-05-16
 
 ### Added
@@ -289,7 +327,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First stable public release 🎉
 
-[unreleased]: https://github.com/tailordev/watson/compare/2.1.0...HEAD
+[unreleased]: https://github.com/tailordev/watson/compare/2.2.0...HEAD
+[2.2.0]: https://github.com/tailordev/watson/compare/2.1.0...2.2.0
 [2.1.0]: https://github.com/tailordev/watson/compare/2.0.1...2.1.0
 [2.0.1]: https://github.com/tailordev/watson/compare/2.0.0...2.0.1
 [2.0.0]: https://github.com/tailordev/watson/compare/1.10.0...2.0.0
