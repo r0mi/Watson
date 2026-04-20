@@ -44,6 +44,8 @@ class Watson(object):
         self._old_state = None
         self._frames = None
         self._last_sync = None
+        self._clickup_sync = None
+        self._clickup_sync_changed = False
         self._config = None
         self._config_changed = False
 
@@ -54,6 +56,7 @@ class Watson(object):
         self.frames_file = os.path.join(self._dir, 'frames')
         self.state_file = os.path.join(self._dir, 'state')
         self.last_sync_file = os.path.join(self._dir, 'last_sync')
+        self.clickup_sync_file = os.path.join(self._dir, 'clickup_sync')
 
         if 'frames' in kwargs:
             self.frames = kwargs['frames']
@@ -159,6 +162,13 @@ class Watson(object):
             if self._last_sync is not None:
                 safe_save(self.last_sync_file,
                           make_json_writer(self._format_date, self.last_sync))
+
+            if self._clickup_sync_changed:
+                safe_save(
+                    self.clickup_sync_file,
+                    make_json_writer(lambda: self._clickup_sync),
+                )
+                self._clickup_sync_changed = False
         except OSError as e:
             raise WatsonError(
                 "Impossible to write {}: {}".format(e.filename, e)
@@ -228,6 +238,33 @@ class Watson(object):
             value = self._parse_date(value)
 
         self._last_sync = value
+
+    @property
+    def clickup_sync(self):
+        """Map of frame id -> ClickUp time-entry id for already-pushed frames.
+
+        Mutating the returned dict is the supported way to record new
+        entries; callers must then invoke `save()` to persist.
+        """
+        if self._clickup_sync is None:
+            self._clickup_sync = self._load_json_file(
+                self.clickup_sync_file, type=dict,
+            )
+        return self._clickup_sync
+
+    def mark_clickup_synced(self, frame_id, entry_id):
+        """Record a ClickUp time-entry id for a Watson frame id."""
+        self.clickup_sync[frame_id] = entry_id
+        self._clickup_sync_changed = True
+
+    def frames_for_day_range(self, start, stop):
+        """Yield frames whose start falls within ``[start, stop)``.
+
+        Uses direct start/stop comparison instead of `Frames.span`, because
+        `Span` rounds the stop up to the end of its day, which would fold
+        the following calendar day back into the result.
+        """
+        return [f for f in self.frames if start <= f.start < stop]
 
     @property
     def is_started(self):
@@ -501,12 +538,12 @@ class Watson(object):
         total = datetime.timedelta()
 
         report = {
-             'timespan': {
-                 'from': span.start,
-                 'to': span.stop,
-             },
-             'projects': []
-         }
+            'timespan': {
+                'from': span.start,
+                'to': span.stop,
+            },
+            'projects': []
+        }
 
         for project, frames in frames_by_project:
             frames = tuple(frames)

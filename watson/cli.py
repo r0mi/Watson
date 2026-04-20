@@ -12,6 +12,7 @@ import click
 from click_didyoumean import DYMGroup
 
 import watson as _watson
+from . import clickup as _clickup
 from .autocompletion import (
     get_frames,
     get_project_or_task_completion,
@@ -283,11 +284,13 @@ def _start(watson, project, tags, restart=False, start_at=None, gap=True):
               help="Confirm addition of new project.")
 @click.option('-b', '--confirm-new-tag', is_flag=True, default=False,
               help="Confirm creation of new tag.")
+@click.option('--cu', 'cu_id', default=None,
+              help="ClickUp task id; stored as a `cu:<id>` tag on the frame.")
 @click.pass_obj
 @click.pass_context
 @catch_watson_error
 def start(ctx, watson, confirm_new_project, confirm_new_tag, args, at_,
-          gap_=True):
+          cu_id, gap_=True):
     """
     Start monitoring time for the given project.
     You can add tags indicating more specifically what you are working on with
@@ -330,6 +333,11 @@ def start(ctx, watson, confirm_new_project, confirm_new_tag, args, at_,
 
     # Parse all the tags
     tags = parse_tags(args)
+
+    if cu_id:
+        cu_tag = 'cu:{}'.format(cu_id)
+        if cu_tag not in tags:
+            tags = [cu_tag] + tags
 
     # Confirm creation of new tag(s) if that option is set
     if (watson.config.getboolean('options', 'confirm_new_tag') or
@@ -1155,6 +1163,8 @@ def log(watson, current, reverse, from_, to, projects, tags, ignore_projects,
         reverse=reverse
     )
 
+    sync_map = watson.clickup_sync
+
     lines = []
     # use the pager, or print directly to the terminal
     if pager or (pager is None and
@@ -1193,7 +1203,8 @@ def log(watson, current, reverse, from_, to, projects, tags, ignore_projects,
         )
 
         _print("\n".join(
-            "\t{id}  {start} to {stop}  {delta:>11}  {project}{tags}".format(
+            "\t{id}  {start} to {stop}  {delta:>11}  "
+            "{project}{tags}{synced}".format(
                 delta=format_timedelta(frame.stop - frame.start),
                 project=style('project', '{:>{}}'.format(
                     frame.project, longest_project
@@ -1201,7 +1212,9 @@ def log(watson, current, reverse, from_, to, projects, tags, ignore_projects,
                 tags=(" "*2 if frame.tags else "") + style('tags', frame.tags),
                 start=style('time', '{:HH:mm}'.format(frame.start)),
                 stop=style('time', '{:HH:mm}'.format(frame.stop)),
-                id=style('short_id', frame.id)
+                id=style('short_id', frame.id),
+                synced=click.style(' \u2713 cu', fg='green')
+                if frame.id in sync_map else '',
             )
             for frame in frames
         ))
@@ -1290,9 +1303,11 @@ def frames(watson):
               help="Confirm addition of new project.")
 @click.option('-b', '--confirm-new-tag', is_flag=True, default=False,
               help="Confirm creation of new tag.")
+@click.option('--cu', 'cu_id', default=None,
+              help="ClickUp task id; stored as a `cu:<id>` tag on the frame.")
 @click.pass_obj
 @catch_watson_error
-def add(watson, args, from_, to, confirm_new_project, confirm_new_tag):
+def add(watson, args, from_, to, confirm_new_project, confirm_new_tag, cu_id):
     """
     Add time to a project with tag(s) that was not tracked live.
 
@@ -1316,6 +1331,11 @@ def add(watson, args, from_, to, confirm_new_project, confirm_new_tag):
 
     # Parse all the tags
     tags = parse_tags(args)
+
+    if cu_id:
+        cu_tag = 'cu:{}'.format(cu_id)
+        if cu_tag not in tags:
+            tags = [cu_tag] + tags
 
     # Confirm creation of new tag(s) if that option is set
     if (watson.config.getboolean('options', 'confirm_new_tag') or
@@ -1800,3 +1820,233 @@ def rename(watson, rename_type, old_name, new_name):
             'You have to call rename with type "project" or "tag"; '
             'you supplied "%s"' % rename_type
         ))
+
+
+@cli.group(cls=DYMGroup)
+def clickup():
+    """Push Watson frames to ClickUp as time entries."""
+
+
+def _clickup_description(frame):
+    extra = _clickup.non_cu_tags(frame)
+    if extra:
+        return '{} [{}]'.format(frame.project, ', '.join(extra))
+    return frame.project
+
+
+@clickup.command('push')
+@click.option('--day', 'day', default='today',
+              help="Which day to push: today, yesterday, -Nd (N days ago), "
+                   "or YYYY-MM-DD. Defaults to today.")
+@click.option('--dry-run', 'dry_run', is_flag=True, default=False,
+              help="Report what would be pushed without calling the API.")
+@click.option('--force', 'force', is_flag=True, default=False,
+              help="Bypass safety checks: re-push frames already in the "
+                   "sync map, and skip (instead of aborting on) frames "
+                   "without a ClickUp id.")
+@click.pass_obj
+@catch_watson_error
+def clickup_push(watson, day, dry_run, force):
+    """
+    Push all frames for the selected day to ClickUp as time entries.
+
+    Each frame must carry a `cu:<task_id>` tag (set via `watson start --cu`,
+    `+cu:<id>`, or `watson clickup tag`). `--dry-run` lists frames that would
+    be pushed and frames missing a ClickUp id, without calling the API.
+    """
+    start, stop = _clickup.parse_day(day)
+
+    token = watson.config.get('clickup', 'token')
+    team_id = watson.config.get('clickup', 'team_id')
+
+    sync_map = watson.clickup_sync
+    missing_id = []
+    already_pushed = []
+    to_push = []
+
+    for frame in watson.frames_for_day_range(start, stop):
+        cu_id = _clickup.extract_clickup_id(frame)
+        if not cu_id:
+            missing_id.append(frame)
+        elif frame.id in sync_map and not force:
+            already_pushed.append((frame, cu_id, sync_map[frame.id]))
+        else:
+            to_push.append((frame, cu_id))
+
+    day_label = '{} → {}'.format(
+        start.format('YYYY-MM-DD'), stop.format('YYYY-MM-DD'),
+    )
+
+    if dry_run:
+        click.echo("Dry run for {}:".format(day_label))
+        _print_clickup_buckets(missing_id, already_pushed, to_push)
+        return
+
+    if missing_id and not force:
+        click.echo(style(
+            'error',
+            "Aborting: {} frame(s) are missing a ClickUp id.".format(
+                len(missing_id),
+            ),
+        ))
+        _print_missing_frames(missing_id)
+        click.echo(
+            "Use `watson clickup tag <frame_id> <cu_id>` to attach one, "
+            "re-run with --dry-run to see the full picture, "
+            "or pass --force to skip them and push the rest."
+        )
+        raise click.exceptions.Exit(code=1)
+
+    if missing_id:  # and force
+        click.echo(style(
+            'error',
+            "Skipping {} frame(s) without a ClickUp id (--force):".format(
+                len(missing_id),
+            ),
+        ))
+        _print_missing_frames(missing_id)
+
+    if not to_push:
+        click.echo("Nothing to push for {}.".format(day_label))
+        if already_pushed:
+            click.echo("{} frame(s) already synced (use --force to re-push).".
+                       format(len(already_pushed)))
+        return
+
+    client = _clickup.ClickUpClient(token, team_id)
+
+    pushed = 0
+    for frame, cu_id in to_push:
+        duration_ms = (
+            frame.stop.int_timestamp - frame.start.int_timestamp
+        ) * 1000
+        entry_id = client.create_time_entry(
+            task_id=cu_id,
+            start=frame.start,
+            duration_ms=duration_ms,
+            description=_clickup_description(frame),
+            tags=_clickup.non_cu_tags(frame),
+        )
+        watson.mark_clickup_synced(frame.id, entry_id)
+        # Persist after each successful POST so a mid-run failure does not
+        # lose progress.
+        watson.save()
+        pushed += 1
+        click.echo("Pushed frame {} → ClickUp entry {} (task {}).".format(
+            style('short_id', frame.id),
+            entry_id,
+            cu_id,
+        ))
+
+    summary = "{} pushed".format(pushed)
+    if already_pushed:
+        summary += ", {} skipped".format(len(already_pushed))
+    click.echo(summary + ".")
+
+
+def _print_clickup_buckets(missing_id, already_pushed, to_push):
+    click.echo("  to push       : {}".format(len(to_push)))
+    for frame, cu_id in to_push:
+        click.echo("    {} {} → cu:{}".format(
+            style('short_id', frame.id),
+            style('project', frame.project),
+            cu_id,
+        ))
+    click.echo("  already pushed: {}".format(len(already_pushed)))
+    for frame, cu_id, entry_id in already_pushed:
+        click.echo("    {} {} → cu:{} (entry {})".format(
+            style('short_id', frame.id),
+            style('project', frame.project),
+            cu_id,
+            entry_id,
+        ))
+    click.echo(style('error', "  missing id    : {}".format(len(missing_id))))
+    _print_missing_frames(missing_id)
+
+
+def _print_missing_frames(frames):
+    for frame in frames:
+        click.echo("    {} {} [{}] {}".format(
+            style('short_id', frame.id),
+            style('project', frame.project),
+            ', '.join(frame.tags) if frame.tags else '-',
+            frame.start.format('YYYY-MM-DD HH:mm'),
+        ))
+
+
+@clickup.command('find')
+@click.argument('query')
+@click.option('--list-id', 'list_id', default=None,
+              help="Limit search to this ClickUp list id. Defaults to "
+                   "`clickup.list_id` from config, or team-wide if unset.")
+@click.option('--include-closed', is_flag=True, default=False,
+              help="Include closed tasks in the result.")
+@click.option('--limit', default=50, type=int,
+              help="Print at most N matches. Default 50.")
+@click.pass_obj
+@catch_watson_error
+def clickup_find(watson, query, list_id, include_closed, limit):
+    """
+    Search ClickUp tasks by a case-insensitive substring of the name.
+
+    ClickUp's public v2 API has no server-side name filter, so this
+    paginates the list or team endpoint and filters client-side. Set
+    `clickup.list_id` in config (or pass `--list-id`) to keep queries fast.
+    """
+    token = watson.config.get('clickup', 'token')
+    team_id = watson.config.get('clickup', 'team_id')
+    list_id = list_id or watson.config.get('clickup', 'list_id')
+
+    client = _clickup.ClickUpClient(token, team_id)
+    matches = client.search_tasks(
+        query, list_id=list_id, include_closed=include_closed,
+    )
+
+    if not matches:
+        click.echo("No matching tasks.")
+        return
+
+    for task in matches[:limit]:
+        status = (task.get('status') or {}).get('status') or '?'
+        list_obj = task.get('list') or {}
+        list_name = list_obj.get('name') or '?'
+        list_id_ = list_obj.get('id') or '?'
+        click.echo("{id}  [{status}]  {name}  ({list}, list:{lid})".format(
+            id=style('id', task.get('id', '?')),
+            status=status,
+            name=task.get('name', '(no name)'),
+            list=style('project', list_name),
+            lid=style('id', str(list_id_)),
+        ))
+
+    if len(matches) > limit:
+        click.echo("... {} more match(es); raise --limit to see them.".format(
+            len(matches) - limit,
+        ))
+
+
+@clickup.command('tag')
+@click.argument('frame_id', shell_complete=get_frames)
+@click.argument('cu_id')
+@click.pass_obj
+@catch_watson_error
+def clickup_tag(watson, frame_id, cu_id):
+    """
+    Attach a ClickUp task id to an existing frame.
+
+    Replaces any existing `cu:*` tag on the frame.
+    """
+    frame = get_frame_from_argument(watson, frame_id)
+    new_tags = [t for t in frame.tags
+                if not t.startswith(_clickup.CU_TAG_PREFIX)]
+    new_tags.insert(0, '{}{}'.format(_clickup.CU_TAG_PREFIX, cu_id))
+
+    watson.frames[frame.id] = frame._replace(
+        tags=new_tags,
+        updated_at=arrow.utcnow(),
+    )
+    watson.save()
+    click.echo("Attached {} to frame {}.".format(
+        style('tag', '{}{}'.format(_clickup.CU_TAG_PREFIX, cu_id)),
+        style('short_id', frame.id),
+    ))
