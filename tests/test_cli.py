@@ -238,3 +238,107 @@ def test_restart_valid_time(runner, watson, mocker, at_dt):
     # Test that the last frame can be restarted
     result = runner.invoke(cli.restart, ['--at', at_dt], obj=watson)
     assert result.exit_code == 0
+
+
+# DateTimeParamType._parse_multiformat — shortcut formats for datetime opts
+
+# Fixed clock: Monday 2026-04-20 14:30:00 local.
+_FROZEN_NOW = datetime(2026, 4, 20, 14, 30, 0, tzinfo=local_tz_info())
+
+
+@pytest.fixture
+def frozen_now(mocker):
+    mocker.patch('arrow.arrow.dt_datetime', wraps=datetime)
+    arrow.arrow.dt_datetime.now.return_value = _FROZEN_NOW
+    return _FROZEN_NOW
+
+
+@pytest.mark.parametrize('value,expected', [
+    # now
+    ('now', (2026, 4, 20, 14, 30, 0)),
+    ('NOW', (2026, 4, 20, 14, 30, 0)),
+    (' now ', (2026, 4, 20, 14, 30, 0)),
+    # relative offsets (past only)
+    ('-5m', (2026, 4, 20, 14, 25, 0)),
+    ('-1h', (2026, 4, 20, 13, 30, 0)),
+    ('-1h30m', (2026, 4, 20, 13, 0, 0)),
+    ('-2h15m30s', (2026, 4, 20, 12, 14, 30)),
+    ('-90s', (2026, 4, 20, 14, 28, 30)),
+    # yesterday / today + HH:MM
+    ('yesterday 23:20', (2026, 4, 19, 23, 20, 0)),
+    ('Yesterday 9:05', (2026, 4, 19, 9, 5, 0)),
+    ('today 09:30', (2026, 4, 20, 9, 30, 0)),
+    ('TODAY 9:30:15', (2026, 4, 20, 9, 30, 15)),
+    # bare HH:MM[:SS] → today
+    ('10:34', (2026, 4, 20, 10, 34, 0)),
+    ('14:12:43', (2026, 4, 20, 14, 12, 43)),
+    ('9:05', (2026, 4, 20, 9, 5, 0)),
+    # MM-DD HH:MM / DD.MM HH:MM → this year
+    ('04-20 09:30', (2026, 4, 20, 9, 30, 0)),
+    ('4-20 9:30', (2026, 4, 20, 9, 30, 0)),
+    ('20.04 09:30', (2026, 4, 20, 9, 30, 0)),
+    ('20.4 9:30', (2026, 4, 20, 9, 30, 0)),
+    ('04-20 09:30:15', (2026, 4, 20, 9, 30, 15)),
+    # absolute fallback (regression)
+    ('2019-04-10T14:12', (2019, 4, 10, 14, 12, 0)),
+    ('2019-04-10T14:12:43', (2019, 4, 10, 14, 12, 43)),
+    ('2018-04-10 12:30:43', (2018, 4, 10, 12, 30, 43)),
+])
+def test_parse_multiformat_valid(frozen_now, value, expected):
+    result = cli.DateTime._parse_multiformat(value)
+    assert result is not None, "expected {!r} to parse".format(value)
+    got = (result.year, result.month, result.day,
+           result.hour, result.minute, result.second)
+    assert got == expected
+
+
+@pytest.mark.parametrize('value', [
+    '+5m',              # positive offset rejected (collides with tag syntax)
+    '5m',               # missing leading minus
+    '-',                # no digits
+    '-abc',             # non-numeric offset
+    '-m',               # digits missing
+    'yesterday',        # prefix but no time
+    'yesterday foo',
+    'tomorrow 09:00',   # only yesterday/today supported
+    '14.05',            # ambiguous bare date/time
+    'garbage',
+])
+def test_parse_multiformat_invalid(frozen_now, value):
+    assert cli.DateTime._parse_multiformat(value) is None
+
+
+def test_start_at_relative_offset(runner, watson, mocker):
+    """End-to-end: `watson start --at -15m` backdates the frame by 15 min."""
+    mocker.patch('arrow.arrow.dt_datetime', wraps=datetime)
+    fixed = datetime(2026, 4, 20, 14, 30, 0, tzinfo=local_tz_info())
+    arrow.arrow.dt_datetime.now.return_value = fixed
+    result = runner.invoke(
+        cli.start, ['a-project', '--at', '-15m'], obj=watson)
+    assert result.exit_code == 0, result.output
+    assert watson.current['start'].hour == 14
+    assert watson.current['start'].minute == 15
+
+
+def test_parse_multiformat_arrow_passthrough(frozen_now):
+    """Click invokes convert() on defaults too; --from/--to defaults are
+    arrow.Arrow instances and must not be string-parsed."""
+    already = arrow.Arrow(2024, 1, 15, 12, 0, 0)
+    assert cli.DateTime._parse_multiformat(already) is already
+
+
+def test_log_runs_with_arrow_default(runner, watson):
+    """Regression: `watson log` uses an arrow default for --from/--to."""
+    result = runner.invoke(cli.log, obj=watson)
+    assert result.exit_code == 0, result.output
+
+
+def test_start_at_now(runner, watson, mocker):
+    mocker.patch('arrow.arrow.dt_datetime', wraps=datetime)
+    fixed = datetime(2026, 4, 20, 14, 30, 0, tzinfo=local_tz_info())
+    arrow.arrow.dt_datetime.now.return_value = fixed
+    result = runner.invoke(
+        cli.start, ['a-project', '--at', 'now'], obj=watson)
+    assert result.exit_code == 0, result.output
+    assert watson.current['start'].hour == 14
+    assert watson.current['start'].minute == 30

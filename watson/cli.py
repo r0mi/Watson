@@ -3,6 +3,7 @@ import itertools
 import json
 import operator
 import os
+import re
 from dateutil import tz
 from functools import reduce, wraps
 
@@ -82,8 +83,27 @@ def local_tz_info() -> datetime.tzinfo:
     return tzinfo
 
 
+DATETIME_FORMAT_HELP = (
+    "Accepts: `now`, past offsets like `-5m` / `-1h30m` / `-90s`, "
+    "`HH:MM[:SS]` (today), `yesterday HH:MM[:SS]`, `today HH:MM[:SS]`, "
+    "`MM-DD HH:MM[:SS]` or `DD.MM HH:MM[:SS]` (this year), "
+    "or a full `(YYYY-MM-DDT)?HH:MM(:SS)?`."
+)
+
+
 class DateTimeParamType(click.ParamType):
     name = 'datetime'
+
+    _RELATIVE_OFFSET_RE = re.compile(
+        r'^-(?=\d)(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$'
+    )
+    _TIME_RE = re.compile(r'^\d{1,2}:\d{2}(?::\d{2})?$')
+    _DATE_TIME_RE = re.compile(
+        r'^\d{1,2}[-.]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?$'
+    )
+    _TIME_FORMATS = ('H:mm:ss', 'H:mm')
+    _MM_DD_FORMATS = ('M-D H:mm:ss', 'M-D H:mm')
+    _DD_MM_FORMATS = ('D.M H:mm:ss', 'D.M H:mm')
 
     def convert(self, value, param, ctx) -> arrow:
         if value:
@@ -108,22 +128,77 @@ class DateTimeParamType(click.ParamType):
             return date
 
     def _parse_multiformat(self, value) -> arrow:
-        date = None
-        for fmt in (None, 'HH:mm:ss', 'HH:mm'):
+        # Click also invokes convert() on default values. When a command
+        # declares an `arrow` default (e.g. `default=arrow.now().shift(...)`
+        # on report/log/aggregate), click feeds the Arrow instance straight
+        # in. Pass it through instead of trying to string-parse it.
+        if isinstance(value, arrow.Arrow):
+            return value
+
+        stripped = value.strip()
+        lowered = stripped.lower()
+
+        if lowered == 'now':
+            return arrow.now()
+
+        match = self._RELATIVE_OFFSET_RE.match(stripped)
+        if match:
+            hours, minutes, seconds = (
+                int(g) if g else 0 for g in match.groups()
+            )
+            return arrow.now().shift(
+                hours=-hours, minutes=-minutes, seconds=-seconds,
+            )
+
+        for prefix, days in (('yesterday ', -1), ('today ', 0)):
+            if lowered.startswith(prefix):
+                tail = stripped[len(prefix):].strip()
+                if not self._TIME_RE.match(tail):
+                    return None
+                parsed = self._try_formats(tail, self._TIME_FORMATS)
+                if parsed is None:
+                    return None
+                return arrow.now().shift(days=days).replace(
+                    hour=parsed.hour, minute=parsed.minute,
+                    second=parsed.second, microsecond=0,
+                )
+
+        # Absolute datetimes ("YYYY-MM-DD HH:MM", ISO-8601, etc.) go before
+        # the lenient time-only and date-only parsers, because arrow's
+        # format-based parser does partial matches (e.g. `H:mm` would happily
+        # match the tail of "2019-04-10 14:12"). Pass the original `value` so
+        # leading/trailing whitespace remains strict (preserves the existing
+        # INVALID_DATES_DATA contract).
+        try:
+            return arrow.get(value)
+        except (ValueError, TypeError):
+            pass
+
+        if self._TIME_RE.match(stripped):
+            parsed = self._try_formats(stripped, self._TIME_FORMATS)
+            if parsed is not None:
+                return arrow.now().replace(
+                    hour=parsed.hour, minute=parsed.minute,
+                    second=parsed.second,
+                )
+
+        if self._DATE_TIME_RE.match(stripped):
+            formats = (self._DD_MM_FORMATS if '.' in stripped
+                       else self._MM_DD_FORMATS)
+            parsed = self._try_formats(stripped, formats)
+            if parsed is not None:
+                return parsed.replace(year=arrow.now().year)
+
+        return None
+
+    @staticmethod
+    def _try_formats(value, formats):
+        for fmt in formats:
             try:
-                if fmt is None:
-                    date = arrow.get(value)
-                else:
-                    date = arrow.get(value, fmt)
-                    date = arrow.now().replace(
-                        hour=date.hour,
-                        minute=date.minute,
-                        second=date.second
-                    )
-                break
+                return arrow.get(value, fmt)
             except (ValueError, TypeError):
-                pass
-        return date
+                continue
+        return None
 
 
 DateTime = DateTimeParamType()
@@ -197,8 +272,7 @@ def _start(watson, project, tags, restart=False, start_at=None, gap=True):
 @cli.command()
 @click.option('--at', 'at_', type=DateTime, default=None,
               cls=MutuallyExclusiveOption, mutually_exclusive=['gap_'],
-              help=('Start frame at this time. Must be in '
-                    '(YYYY-MM-DDT)?HH:MM(:SS)? format.'))
+              help='Start frame at this time. ' + DATETIME_FORMAT_HELP)
 @click.option('-g/-G', '--gap/--no-gap', 'gap_', is_flag=True, default=True,
               cls=MutuallyExclusiveOption, mutually_exclusive=['at_'],
               help=("(Don't) leave gap between end time of previous project "
@@ -281,8 +355,7 @@ def start(ctx, watson, confirm_new_project, confirm_new_tag, args, at_,
 
 @cli.command(context_settings={'ignore_unknown_options': True})
 @click.option('--at', 'at_', type=DateTime, default=None,
-              help=('Stop frame at this time. Must be in '
-                    '(YYYY-MM-DDT)?HH:MM(:SS)? format.'))
+              help='Stop frame at this time. ' + DATETIME_FORMAT_HELP)
 @click.pass_obj
 @catch_watson_error
 def stop(watson, at_):
@@ -314,8 +387,7 @@ def stop(watson, at_):
 @cli.command(context_settings={'ignore_unknown_options': True})
 @click.option('--at', 'at_', type=DateTime, default=None,
               cls=MutuallyExclusiveOption, mutually_exclusive=['gap_'],
-              help=('Start frame at this time. Must be in '
-                    '(YYYY-MM-DDT)?HH:MM(:SS)? format.'))
+              help='Start frame at this time. ' + DATETIME_FORMAT_HELP)
 @click.option('-g/-G', '--gap/--no-gap', 'gap_', is_flag=True, default=True,
               cls=MutuallyExclusiveOption, mutually_exclusive=['at_'],
               help=("(Don't) leave gap between end time of previous project "
@@ -1209,9 +1281,11 @@ def frames(watson):
 @click.argument('args', nargs=-1,
                 shell_complete=get_project_or_task_completion)
 @click.option('-f', '--from', 'from_', required=True, type=DateTime,
-              help="Date and time of start of tracked activity")
+              help='Date and time of start of tracked activity. '
+                   + DATETIME_FORMAT_HELP)
 @click.option('-t', '--to', required=True, type=DateTime,
-              help="Date and time of end of tracked activity")
+              help='Date and time of end of tracked activity. '
+                   + DATETIME_FORMAT_HELP)
 @click.option('-c', '--confirm-new-project', is_flag=True, default=False,
               help="Confirm addition of new project.")
 @click.option('-b', '--confirm-new-tag', is_flag=True, default=False,
@@ -1711,15 +1785,15 @@ def rename(watson, rename_type, old_name, new_name):
     if rename_type == 'tag':
         watson.rename_tag(old_name, new_name)
         click.echo('Renamed tag "{}" to "{}"'.format(
-                        style('tag', old_name),
-                        style('tag', new_name)
-                   ))
+            style('tag', old_name),
+            style('tag', new_name)
+        ))
     elif rename_type == 'project':
         watson.rename_project(old_name, new_name)
         click.echo('Renamed project "{}" to "{}"'.format(
-                        style('project', old_name),
-                        style('project', new_name)
-                   ))
+            style('project', old_name),
+            style('project', new_name)
+        ))
     else:
         raise click.ClickException(style(
             'error',
