@@ -58,7 +58,7 @@ resolves to the pipx copy.
   $ brew install pipx git                         # if not already installed
   $ pipx ensurepath                               # adds ~/.local/bin to PATH
   $ git clone -b clickup-integration git@github.com:r0mi/Watson.git
-  $ pipx install -e Watson                        # -e = editable, picks up edits
+  $ pipx install -e /path/to/local/Watson         # -e = editable, picks up edits
 
 **Linux**
 
@@ -72,7 +72,7 @@ resolves to the pipx copy.
 
   $ pipx ensurepath
   $ git clone -b clickup-integration git@github.com:r0mi/Watson.git
-  $ pipx install -e Watson
+  $ pipx install -e /path/to/local/Watson
 
 **Windows (PowerShell)**
 
