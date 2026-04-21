@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-04-21
+
+### Fixed
+
+- Shell completion callbacks (`get_projects`, `get_tags`, `get_frames`,
+  `get_rename_name`, `get_rename_types`,
+  `get_project_or_task_completion`) now work under click 8. Click 8
+  passes a `click.Parameter` to `shell_complete` callbacks where the
+  pre-8 API passed the list of already-parsed tokens; the callbacks
+  were still indexing that argument as a list and silently returning
+  nothing. Reconstructed from `ctx.params[param.name]`, with a
+  fallback for the list form so the existing test suite keeps
+  working. Return values are plain lists (click 8 requires that).
+
+### Added
+
+- `README.rst`: install-from-source section covering macOS, Linux, and
+  Windows (PowerShell), with `pipx` commands and shell-completion
+  install snippets. Documents that the ClickUp integration lives on
+  the `clickup-integration` branch.
+
 ## [2.2.0] - 2026-04-20
 
 ### Added
@@ -327,7 +348,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First stable public release 🎉
 
-[unreleased]: https://github.com/tailordev/watson/compare/2.2.0...HEAD
+[unreleased]: https://github.com/tailordev/watson/compare/2.2.1...HEAD
+[2.2.1]: https://github.com/tailordev/watson/compare/2.2.0...2.2.1
 [2.2.0]: https://github.com/tailordev/watson/compare/2.1.0...2.2.0
 [2.1.0]: https://github.com/tailordev/watson/compare/2.0.1...2.1.0
 [2.0.1]: https://github.com/tailordev/watson/compare/2.0.0...2.0.1
