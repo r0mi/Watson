@@ -8,11 +8,36 @@ def _bypass_click_bug_to_ensure_watson(ctx):
     return ctx.obj
 
 
-def get_project_or_task_completion(ctx, args, incomplete):
+def _prior_tokens(ctx, param):
+    """Return the tokens already parsed for ``param`` as a list of strings.
+
+    Click 8 invokes shell_complete callbacks with ``(ctx, param, incomplete)``
+    where ``param`` is a :class:`click.Parameter`; earlier Click (and the test
+    suite here) passes the tokens directly as a list.  Accept both so the rest
+    of this module can keep operating on a plain list of strings.
+    """
+    if isinstance(param, (list, tuple)):
+        return [str(v) for v in param]
+
+    name = getattr(param, "name", None)
+    if name is None:
+        return []
+
+    value = ctx.params.get(name)
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
+def get_project_or_task_completion(ctx, param, incomplete):
     """Function to autocomplete either organisations or tasks, depending on the
        shape of the current argument."""
 
     assert isinstance(incomplete, str)
+
+    args = _prior_tokens(ctx, param)
 
     def get_incomplete_tag(args, incomplete):
         """Get incomplete tag from command line string."""
@@ -30,21 +55,6 @@ def get_project_or_task_completion(ctx, args, incomplete):
         """
         return "".join(char for char in incomplete_tag.split(" "))
 
-    def prepend_plus(tag_suggestions):
-        """
-        Prepend '+' to each tag suggestion.
-
-        For the `watson` targeted with the function
-        get_project_or_task_completion, a leading plus in front of a tag is
-        expected. The get_tags() suggestion generation does not include those
-        as it targets other subcommands.
-
-        In order to not destroy the current tag stub, the plus must be
-        pretended.
-        """
-        for cur_suggestion in tag_suggestions:
-            yield "+{cur_suggestion}".format(cur_suggestion=cur_suggestion)
-
     _bypass_click_bug_to_ensure_watson(ctx)
 
     project_is_completed = any(
@@ -53,21 +63,19 @@ def get_project_or_task_completion(ctx, args, incomplete):
     if project_is_completed:
         incomplete_tag = get_incomplete_tag(args, incomplete)
         fixed_incomplete_tag = fix_broken_tag_parsing(incomplete_tag)
-        tag_suggestions = get_tags(ctx, args, fixed_incomplete_tag)
-        return prepend_plus(tag_suggestions)
+        tag_suggestions = get_tags(ctx, param, fixed_incomplete_tag)
+        return ["+{}".format(tag) for tag in tag_suggestions]
     else:
-        return get_projects(ctx, args, incomplete)
+        return get_projects(ctx, param, incomplete)
 
 
-def get_projects(ctx, args, incomplete):
+def get_projects(ctx, param, incomplete):
     """Function to return all projects matching the prefix."""
     watson = _bypass_click_bug_to_ensure_watson(ctx)
-    for cur_project in watson.projects:
-        if cur_project.startswith(incomplete):
-            yield cur_project
+    return [p for p in watson.projects if p.startswith(incomplete)]
 
 
-def get_rename_name(ctx, args, incomplete):
+def get_rename_name(ctx, param, incomplete):
     """
     Function to return all projects or tasks matching the prefix
 
@@ -81,29 +89,25 @@ def get_rename_name(ctx, args, incomplete):
 
     in_type = ctx.params["rename_type"]
     if in_type == "project":
-        return get_projects(ctx, args, incomplete)
+        return get_projects(ctx, param, incomplete)
     elif in_type == "tag":
-        return get_tags(ctx, args, incomplete)
+        return get_tags(ctx, param, incomplete)
 
     return []
 
 
-def get_rename_types(ctx, args, incomplete):
+def get_rename_types(ctx, param, incomplete):
     """Function to return all rename types matching the prefix."""
-    for cur_type in "project", "tag":
-        if cur_type.startswith(incomplete):
-            yield cur_type
+    return [t for t in ("project", "tag") if t.startswith(incomplete)]
 
 
-def get_tags(ctx, args, incomplete):
+def get_tags(ctx, param, incomplete):
     """Function to return all tags matching the prefix."""
     watson = _bypass_click_bug_to_ensure_watson(ctx)
-    for cur_tag in watson.tags:
-        if cur_tag.startswith(incomplete):
-            yield cur_tag
+    return [t for t in watson.tags if t.startswith(incomplete)]
 
 
-def get_frames(ctx, args, incomplete):
+def get_frames(ctx, param, incomplete):
     """
     Return all matching frame IDs
 
@@ -111,8 +115,4 @@ def get_frames(ctx, args, incomplete):
     generator. If no ID matches the prefix, it returns the empty generator.
     """
     watson = _bypass_click_bug_to_ensure_watson(ctx)
-
-    for cur_frame in watson.frames:
-        yield_candidate = cur_frame.id
-        if yield_candidate.startswith(incomplete):
-            yield yield_candidate
+    return [f.id for f in watson.frames if f.id.startswith(incomplete)]
