@@ -265,6 +265,28 @@ def test_clickup_tag_replaces_existing_cu_tag(runner, watson):
     assert watson.frames[frame.id].tags == ['cu:NEW', 'bug']
 
 
+def test_clickup_tag_running_frame(runner, watson):
+    runner.invoke(cli.start, ['demo', '+bug'], obj=watson)
+
+    result = runner.invoke(cli.clickup, ['tag', 'TASK99'], obj=watson)
+    assert result.exit_code == 0, result.output
+    assert watson.current['tags'] == ['cu:TASK99', 'bug']
+
+
+def test_clickup_tag_running_frame_replaces_existing_cu(runner, watson):
+    runner.invoke(cli.start, ['demo', '+cu:OLD', '+bug'], obj=watson)
+
+    result = runner.invoke(cli.clickup, ['tag', 'NEW'], obj=watson)
+    assert result.exit_code == 0, result.output
+    assert watson.current['tags'] == ['cu:NEW', 'bug']
+
+
+def test_clickup_tag_no_args_no_running_frame_errors(runner, watson):
+    result = runner.invoke(cli.clickup, ['tag', 'TASK99'], obj=watson)
+    assert result.exit_code != 0
+    assert 'No project started' in result.output
+
+
 def test_clickup_push_missing_config_fails_gracefully(runner, watson, mocker,
                                                       frozen_now):
     # token+team_id never set

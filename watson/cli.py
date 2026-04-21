@@ -2026,20 +2026,53 @@ def clickup_find(watson, query, list_id, include_closed, limit):
 
 
 @clickup.command('tag')
-@click.argument('frame_id', shell_complete=get_frames)
-@click.argument('cu_id')
+@click.argument('args', nargs=-1, metavar='[FRAME_ID] CU_ID')
 @click.pass_obj
 @catch_watson_error
-def clickup_tag(watson, frame_id, cu_id):
+def clickup_tag(watson, args):
     """
     Attach a ClickUp task id to an existing frame.
 
     Replaces any existing `cu:*` tag on the frame.
+
+    With one argument, applies the tag to the currently running frame.
+    With two arguments, the first is a frame id or negative index and the
+    second is the ClickUp task id.
     """
+    if len(args) == 1:
+        frame_id, cu_id = None, args[0]
+    elif len(args) == 2:
+        frame_id, cu_id = args
+    else:
+        raise click.UsageError("Expected [FRAME_ID] CU_ID (1 or 2 arguments).")
+
+    cu_tag = '{}{}'.format(_clickup.CU_TAG_PREFIX, cu_id)
+
+    if frame_id is None:
+        if not watson.is_started:
+            raise click.ClickException(
+                style('error', "No project started and no frame id given.")
+            )
+        current = watson.current
+        new_tags = [t for t in current['tags']
+                    if not t.startswith(_clickup.CU_TAG_PREFIX)]
+        new_tags.insert(0, cu_tag)
+        watson.current = dict(
+            start=current['start'],
+            project=current['project'],
+            tags=new_tags,
+        )
+        watson.save()
+        click.echo("Attached {} to running frame ({}).".format(
+            style('tag', cu_tag),
+            style('project', current['project']),
+        ))
+        return
+
     frame = get_frame_from_argument(watson, frame_id)
     new_tags = [t for t in frame.tags
                 if not t.startswith(_clickup.CU_TAG_PREFIX)]
-    new_tags.insert(0, '{}{}'.format(_clickup.CU_TAG_PREFIX, cu_id))
+    new_tags.insert(0, cu_tag)
 
     watson.frames[frame.id] = frame._replace(
         tags=new_tags,
@@ -2047,6 +2080,6 @@ def clickup_tag(watson, frame_id, cu_id):
     )
     watson.save()
     click.echo("Attached {} to frame {}.".format(
-        style('tag', '{}{}'.format(_clickup.CU_TAG_PREFIX, cu_id)),
+        style('tag', cu_tag),
         style('short_id', frame.id),
     ))
