@@ -1827,6 +1827,9 @@ def clickup():
     """Push Watson frames to ClickUp as time entries."""
 
 
+cli.add_command(clickup, name='cu')
+
+
 def _clickup_description(frame):
     extra = _clickup.non_cu_tags(frame)
     if extra:
