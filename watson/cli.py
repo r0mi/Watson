@@ -1270,6 +1270,73 @@ def tags(watson):
         click.echo(style('tag', tag))
 
 
+@cli.command(context_settings={'ignore_unknown_options': True})
+@click.argument('args', nargs=-1, metavar='[FRAME_ID] +TAG...',
+                shell_complete=get_frames)
+@click.option('-b', '--confirm-new-tag', is_flag=True, default=False,
+              help="Confirm creation of new tag.")
+@click.pass_obj
+@catch_watson_error
+def tag(watson, args, confirm_new_tag):
+    """
+    Add tag(s) to the currently running frame or a specific frame.
+
+    Tags must be prefixed with '+'. With no frame argument, applies to the
+    currently running frame. Otherwise, the first non-tag argument is treated
+    as a frame id or negative index.
+
+    \b
+    $ watson tag +feature
+    $ watson tag +feature +fix
+    $ watson tag abc1234 +feature
+    $ watson tag -1 +feature
+    """
+    tags_to_add = parse_tags(args)
+    non_tag_args = [a for a in args if not a.startswith('+')]
+
+    if not tags_to_add:
+        raise click.ClickException(
+            "No tags given. Tags must be prefixed with '+'.")
+
+    frame_id_arg = non_tag_args[0] if non_tag_args else None
+
+    if (watson.config.getboolean('options', 'confirm_new_tag') or
+            confirm_new_tag):
+        confirm_tags(tags_to_add, watson.tags)
+
+    if frame_id_arg is None:
+        if not watson.is_started:
+            raise click.ClickException(
+                style('error', "No project started and no frame id given."))
+        current = watson.current
+        new_tags = current['tags'] + [t for t in tags_to_add
+                                      if t not in current['tags']]
+        watson.current = dict(
+            start=current['start'],
+            project=current['project'],
+            tags=new_tags,
+        )
+        watson.save()
+        click.echo("Added {} to running frame ({}).".format(
+            style('tags', tags_to_add),
+            style('project', current['project']),
+        ))
+    else:
+        frame = get_frame_from_argument(watson, frame_id_arg)
+        new_tags = frame.tags + [t for t in tags_to_add
+                                 if t not in frame.tags]
+        watson.frames[frame.id] = frame._replace(
+            tags=new_tags,
+            updated_at=arrow.utcnow(),
+        )
+        watson.save()
+        click.echo("Added {} to frame {} ({}).".format(
+            style('tags', tags_to_add),
+            style('short_id', frame.id),
+            style('project', frame.project),
+        ))
+
+
 @cli.command()
 @click.pass_obj
 @catch_watson_error

@@ -342,3 +342,61 @@ def test_start_at_now(runner, watson, mocker):
     assert result.exit_code == 0, result.output
     assert watson.current['start'].hour == 14
     assert watson.current['start'].minute == 30
+
+
+# ---------------------------------------------------------------------------
+# watson tag
+# ---------------------------------------------------------------------------
+
+def _make_frame(watson_, project='myproject', tags=None):
+    start = arrow.get('2026-04-20 09:00:00').replace(tzinfo=local_tz_info())
+    stop = start.shift(hours=1)
+    return watson_.frames.add(project, start, stop, tags=tags or [])
+
+
+def test_tag_adds_to_running_frame(runner, watson):
+    runner.invoke(cli.start, ['myproject', '+existing'], obj=watson)
+    result = runner.invoke(cli.tag, ['+newtag'], obj=watson)
+    assert result.exit_code == 0, result.output
+    assert watson.current['tags'] == ['existing', 'newtag']
+
+
+def test_tag_adds_multiple_to_running_frame(runner, watson):
+    runner.invoke(cli.start, ['myproject'], obj=watson)
+    result = runner.invoke(cli.tag, ['+a', '+b'], obj=watson)
+    assert result.exit_code == 0, result.output
+    assert watson.current['tags'] == ['a', 'b']
+
+
+def test_tag_adds_to_frame_by_id(runner, watson):
+    frame = _make_frame(watson, tags=['old'])
+    watson.save()
+    result = runner.invoke(cli.tag, [frame.id, '+new'], obj=watson)
+    assert result.exit_code == 0, result.output
+    assert watson.frames[frame.id].tags == ['old', 'new']
+
+
+def test_tag_adds_to_frame_by_negative_index(runner, watson):
+    frame = _make_frame(watson, tags=['old'])
+    watson.save()
+    result = runner.invoke(cli.tag, ['-1', '+new'], obj=watson)
+    assert result.exit_code == 0, result.output
+    assert watson.frames[frame.id].tags == ['old', 'new']
+
+
+def test_tag_no_running_frame_no_id_errors(runner, watson):
+    result = runner.invoke(cli.tag, ['+newtag'], obj=watson)
+    assert result.exit_code != 0
+
+
+def test_tag_no_tags_given_errors(runner, watson):
+    runner.invoke(cli.start, ['myproject'], obj=watson)
+    result = runner.invoke(cli.tag, [], obj=watson)
+    assert result.exit_code != 0
+
+
+def test_tag_skips_duplicate_tags(runner, watson):
+    runner.invoke(cli.start, ['myproject', '+existing'], obj=watson)
+    result = runner.invoke(cli.tag, ['+existing'], obj=watson)
+    assert result.exit_code == 0, result.output
+    assert watson.current['tags'] == ['existing']

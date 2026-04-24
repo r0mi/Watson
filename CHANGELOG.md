@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-04-24
+
+### Added
+
+- New `watson tag [FRAME_ID] +TAG...` command for adding tags to a frame
+  without opening an editor. With no frame argument, applies to the currently
+  running frame; otherwise the first argument is a frame id or negative index.
+  Existing tags are preserved (duplicates are skipped). Supports
+  `-b/--confirm-new-tag` to prompt before creating a tag that doesn't exist
+  yet.
+
 ## [2.2.1] - 2026-04-21
 
 ### Fixed
