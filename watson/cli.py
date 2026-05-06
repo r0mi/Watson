@@ -2133,9 +2133,10 @@ def clickup_tag(watson, args):
             tags=new_tags,
         )
         watson.save()
-        click.echo("Attached {} to running frame ({}).".format(
+        click.echo("Attached {} to running frame {}{}.".format(
             style('tag', cu_tag),
             style('project', current['project']),
+            (" " if new_tags else "") + style('tags', new_tags),
         ))
         return
 

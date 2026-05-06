@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-05-06
+
+### Changed
+
+- `watson clickup tag` now prints project and tags (e.g. `HE [task, auth]`)
+  when attaching a ClickUp tag to the running frame, matching the style of
+  other commands.
+
 ## [2.3.0] - 2026-04-24
 
 ### Added
