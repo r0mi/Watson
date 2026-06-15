@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-06-15
+
+### Changed
+
+- Tag lists in command output (`log`, `report`, `start`, `stop`, `add`, etc.)
+  are now sorted with the ClickUp `cu:<id>` tag first, followed by all other
+  tags in case-insensitive alphabetical order, instead of insertion order.
+
 ## [2.3.1] - 2026-05-06
 
 ### Changed

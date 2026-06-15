@@ -53,8 +53,13 @@ def style(name, element):
         if not tags:
             return ''
 
+        from .clickup import CU_TAG_PREFIX
+        sorted_tags = sorted(
+            tags,
+            key=lambda t: (not t.startswith(CU_TAG_PREFIX), t.lower())
+        )
         return '[{}]'.format(', '.join(
-            style('tag', tag) for tag in tags
+            style('tag', tag) for tag in sorted_tags
         ))
 
     def _style_short_id(id):
